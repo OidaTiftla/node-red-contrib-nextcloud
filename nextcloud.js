@@ -58,7 +58,7 @@ module.exports = function (RED) {
       dav.createAccount({ server: calDavUri, xhr: xhr, loadCollections: true, loadObjects: true })
         .then(function (account) {
           if (!account.calendars) {
-            node.error('Nextcloud:CalDAV -> no calendars found.')
+            node.error('Nextcloud:CalDAV -> no calendars found.', msg)
             return
           }
           // account instanceof dav.Account
@@ -76,17 +76,17 @@ module.exports = function (RED) {
                       const events = icalExpander.between(startDate.toDate(), endDate.toDate())
                       msg.payload.data = msg.payload.data.concat(convertEvents(events))
                     } catch (error) {
-                      node.error('Error parsing calendar data: ' + error)
+                      node.error('Error parsing calendar data: ' + error, msg)
                     }
                   })
                   node.send(msg)
                 }, function () {
-                  node.error('Nextcloud:CalDAV -> get ics went wrong.')
+                  node.error('Nextcloud:CalDAV -> get ics went wrong.', msg)
                 })
             }
           })
         }, function () {
-          node.error('Nextcloud:CalDAV -> get calendars went wrong.')
+          node.error('Nextcloud:CalDAV -> get calendars went wrong.', msg)
         })
     })
 
@@ -149,7 +149,7 @@ module.exports = function (RED) {
       dav.createAccount({ server: cardDavUri, xhr: xhr, accountType: 'carddav' })
         .then(function (account) {
           if (!account.addressBooks) {
-            node.error('Nextcloud:CardDAV -> no addressbooks found.')
+            node.error('Nextcloud:CardDAV -> no addressbooks found.', msg)
             return
           }
           // account instanceof dav.Account
@@ -171,12 +171,12 @@ module.exports = function (RED) {
                   })
                   node.send(vcfList)
                 }, function () {
-                  node.error('Nextcloud:CardDAV -> get cards went wrong.')
+                  node.error('Nextcloud:CardDAV -> get cards went wrong.', msg)
                 })
             }
           })
         }, function () {
-          node.error('Nextcloud:CardDAV -> get addressBooks went wrong.')
+          node.error('Nextcloud:CardDAV -> get addressBooks went wrong.', msg)
         })
     })
   }
@@ -208,7 +208,7 @@ module.exports = function (RED) {
         .then(function (contents) {
           node.send({ 'payload': contents })
         }, function (error) {
-          node.error('Nextcloud:WebDAV -> get directory content went wrong.' + JSON.stringify(error))
+          node.error('Nextcloud:WebDAV -> get directory content went wrong.' + JSON.stringify(error), msg)
         })
     })
   }
@@ -229,7 +229,7 @@ module.exports = function (RED) {
       } else if (node.filename && node.filename.length) {
         filename = '/' + node.filename
       } else {
-        node.error('Nextcloud:WebDAV -> no filename specified.')
+        node.error('Nextcloud:WebDAV -> no filename specified.', msg)
         return
       }
       filename = filename.replace('//', '/')
@@ -243,7 +243,7 @@ module.exports = function (RED) {
         .then(function (contents) {
           node.send({ 'payload': contents })
         }, function (error) {
-          node.error('Nextcloud:WebDAV -> get file went wrong.' + JSON.stringify(error))
+          node.error('Nextcloud:WebDAV -> get file went wrong.' + JSON.stringify(error), msg)
         })
     })
   }
@@ -287,7 +287,7 @@ module.exports = function (RED) {
           console.log(contents)
           node.send({ 'payload': JSON.parse(contents) })
         }, function () {
-          node.error('Nextcloud:WebDAV -> send file went wrong.')
+          node.error('Nextcloud:WebDAV -> send file went wrong.', msg)
         })
     })
   }
