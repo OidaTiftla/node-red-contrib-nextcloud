@@ -256,7 +256,7 @@ module.exports = function (RED) {
       const option = getHttpsOptions(node.server)
       client.getDirectoryContents(directory, option)
         .then(function (contents) {
-          node.send({ payload: contents })
+          node.send({ ...msg, payload: contents })
         }, function (error) {
           node.error(`Nextcloud:WebDAV -> get directory content went wrong: ${getErrorMessage(error)}`, msg)
         })
@@ -293,7 +293,7 @@ module.exports = function (RED) {
       const option = getHttpsOptions(node.server)
       client.getFileContents(filename, option)
         .then(function (contents) {
-          node.send({ payload: contents })
+          node.send({ ...msg, payload: contents })
         }, function (error) {
           node.error(`Nextcloud:WebDAV -> get file went wrong: ${getErrorMessage(error)}`, msg)
         })
@@ -373,7 +373,7 @@ module.exports = function (RED) {
           payload.size = Number.isFinite(Number(payload.size)) ? Number(payload.size) : 0
           payload.timeout = Number.isFinite(Number(payload.timeout)) ? Number(payload.timeout) : 0
 
-          node.send({ payload })
+          node.send({ ...msg, payload })
         }, function (err) {
           node.error(`Nextcloud:WebDAV -> send file went wrong: ${err.message}`, msg)
         })
