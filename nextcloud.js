@@ -308,6 +308,18 @@ module.exports = function (RED) {
     this.filename = config.filename
     const node = this
 
+    function sendUploadError (msg, code, message) {
+      const errorMsg = {
+        ...msg,
+        error: {
+          code: code,
+          message: message
+        }
+      }
+      node.send(errorMsg)
+      node.error(`Nextcloud:WebDAV -> ${message}`, msg)
+    }
+
     node.on('input', (msg) => {
       const server = getServerConfig(node, msg, 'WebDAV')
       if (!server) {
@@ -320,7 +332,7 @@ module.exports = function (RED) {
         filename = msg.filename
       }
       if (!filename) {
-        node.error('Nextcloud:WebDAV -> no local filename specified.', msg)
+        sendUploadError(msg, 'NO_LOCAL_FILENAME', 'no local filename specified.')
         return
       }
 
@@ -329,7 +341,11 @@ module.exports = function (RED) {
       try {
         file = fs.readFileSync(filename)
       } catch (err) {
-        node.error(`Nextcloud:WebDAV -> unable to read local file: ${getErrorMessage(err)}`, msg)
+        if (err && err.code === 'ENOENT') {
+          sendUploadError(msg, 'ENOENT', `local file not found: ${filename}`)
+          return
+        }
+        sendUploadError(msg, err && err.code ? err.code : 'LOCAL_FILE_READ_ERROR', `unable to read local file: ${getErrorMessage(err)}`)
         return
       }
 
