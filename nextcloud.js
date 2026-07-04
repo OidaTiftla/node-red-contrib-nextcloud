@@ -349,9 +349,31 @@ module.exports = function (RED) {
       const option = getHttpsOptions(node.server)
 
       client.putFileContents(directory + name, file, { format: 'binary' }, option)
-        .then(function (contents) {
-          console.log(contents)
-          node.send({ payload: contents })
+        .then(async function (response) {
+          if (!response || !response.ok) {
+            const status = response ? response.status : 'unknown'
+            const statusText = response ? response.statusText : 'No response'
+            return node.error(`Nextcloud:WebDAV -> send file failed. Status: ${status} ${statusText}`, msg)
+          }
+
+          let payload = { status: response.status, statusText: response.statusText, size: 0, timeout: 0 }
+
+          const text = await response.text()
+          if (text) {
+            try {
+              const parsed = JSON.parse(text)
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                payload = { ...payload, ...parsed }
+              }
+            } catch (e) {
+              return node.error(`Nextcloud:WebDAV -> send file response is not valid JSON: ${e.message}`, msg)
+            }
+          }
+
+          payload.size = Number.isFinite(Number(payload.size)) ? Number(payload.size) : 0
+          payload.timeout = Number.isFinite(Number(payload.timeout)) ? Number(payload.timeout) : 0
+
+          node.send({ payload })
         }, function (err) {
           node.error(`Nextcloud:WebDAV -> send file went wrong: ${err.message}`, msg)
         })
