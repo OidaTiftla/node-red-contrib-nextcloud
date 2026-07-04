@@ -6,6 +6,39 @@ module.exports = function (RED) {
   const moment = require('moment')
   const https = require('https')
 
+  function getErrorMessage (err) {
+    if (!err) {
+      return 'Unknown error'
+    }
+    return err.message || JSON.stringify(err)
+  }
+
+  function getServerConfig (node, msg, protocol) {
+    if (!node.server) {
+      node.error(`Nextcloud:${protocol} -> missing server configuration.`, msg)
+      return null
+    }
+
+    if (!node.server.address || !node.server.credentials || !node.server.credentials.user || !node.server.credentials.pass) {
+      node.error(`Nextcloud:${protocol} -> incomplete server credentials.`, msg)
+      return null
+    }
+
+    return {
+      address: node.server.address,
+      user: node.server.credentials.user,
+      pass: node.server.credentials.pass
+    }
+  }
+
+  function getHttpsOptions (server) {
+    const options = {}
+    if (server.insecure) {
+      options.agent = new https.Agent({ rejectUnauthorized: false })
+    }
+    return options
+  }
+
   function NextcloudConfigNode (config) {
     RED.nodes.createNode(this, config)
     this.address = config.address
@@ -27,6 +60,11 @@ module.exports = function (RED) {
     const node = this
 
     node.on('input', (msg) => {
+      const server = getServerConfig(node, msg, 'CalDAV')
+      if (!server) {
+        return
+      }
+
       let startDate = moment().startOf('day').subtract(this.pastWeeks, 'weeks')
       let endDate = moment().endOf('day').add(this.futureWeeks, 'weeks')
       const filters = [{
@@ -47,14 +85,14 @@ module.exports = function (RED) {
       // dav.debug.enabled = true;
       const xhr = new dav.transport.Basic(
         new dav.Credentials({
-          username: node.server.credentials.user,
-          password: node.server.credentials.pass
+          username: server.user,
+          password: server.pass
         })
       )
       // Server + Basepath
-      let calDavUri = node.server.address + '/remote.php/dav/calendars/'
+      let calDavUri = server.address + '/remote.php/dav/calendars/'
       // User
-      calDavUri += node.server.credentials.user + '/'
+      calDavUri += server.user + '/'
       dav.createAccount({ server: calDavUri, xhr: xhr, loadCollections: true, loadObjects: true })
         .then(function (account) {
           if (!account.calendars) {
@@ -80,13 +118,13 @@ module.exports = function (RED) {
                     }
                   })
                   node.send(msg)
-                }, function () {
-                  node.error('Nextcloud:CalDAV -> get ics went wrong.', msg)
+                }, function (err) {
+                  node.error(`Nextcloud:CalDAV -> get ics went wrong: ${getErrorMessage(err)}`, msg)
                 })
             }
           })
-        }, function () {
-          node.error('Nextcloud:CalDAV -> get calendars went wrong.', msg)
+        }, function (err) {
+          node.error(`Nextcloud:CalDAV -> get calendars went wrong: ${getErrorMessage(err)}`, msg)
         })
     })
 
@@ -134,17 +172,22 @@ module.exports = function (RED) {
     const node = this
 
     node.on('input', (msg) => {
+      const server = getServerConfig(node, msg, 'CardDAV')
+      if (!server) {
+        return
+      }
+
       const xhr = new dav.transport.Basic(
         new dav.Credentials({
-          username: node.server.credentials.user,
-          password: node.server.credentials.pass
+          username: server.user,
+          password: server.pass
         })
       )
 
       // Server + Basepath
-      let cardDavUri = node.server.address + '/remote.php/dav/addressbooks/users/'
+      let cardDavUri = server.address + '/remote.php/dav/addressbooks/users/'
       // User
-      cardDavUri += node.server.credentials.user + '/'
+      cardDavUri += server.user + '/'
       // ToDo Filter ?
       dav.createAccount({ server: cardDavUri, xhr: xhr, accountType: 'carddav' })
         .then(function (account) {
@@ -164,19 +207,24 @@ module.exports = function (RED) {
                     const keyValue = addressBookEntry.addressData.split('\n')
                     let vcfJson = {}
                     for (let x = 0; x < keyValue.length; x++) {
-                      const temp = keyValue[x].split(':')
-                      vcfJson[temp[0]] = temp[1]
+                      const separator = keyValue[x].indexOf(':')
+                      if (separator === -1) {
+                        continue
+                      }
+                      const key = keyValue[x].substring(0, separator)
+                      const value = keyValue[x].substring(separator + 1)
+                      vcfJson[key] = value
                     }
                     vcfList.payload.data.push(vcfJson)
                   })
                   node.send(vcfList)
-                }, function () {
-                  node.error('Nextcloud:CardDAV -> get cards went wrong.', msg)
+                }, function (err) {
+                  node.error(`Nextcloud:CardDAV -> get cards went wrong: ${getErrorMessage(err)}`, msg)
                 })
             }
           })
-        }, function () {
-          node.error('Nextcloud:CardDAV -> get addressBooks went wrong.', msg)
+        }, function (err) {
+          node.error(`Nextcloud:CardDAV -> get addressBooks went wrong: ${getErrorMessage(err)}`, msg)
         })
     })
   }
@@ -189,26 +237,28 @@ module.exports = function (RED) {
     const node = this
 
     node.on('input', (msg) => {
-      const webDavUri = node.server.address + '/remote.php/webdav/'
-      const client = webdav(webDavUri, node.server.credentials.user, node.server.credentials.pass)
+      const server = getServerConfig(node, msg, 'WebDAV')
+      if (!server) {
+        return
+      }
+
+      const webDavUri = server.address + '/remote.php/webdav/'
+      const client = webdav(webDavUri, server.user, server.pass)
       let directory = ''
       if (msg.directory) {
         directory = '/' + msg.directory
       } else if (node.directory && node.directory.length) {
         directory = '/' + node.directory
       }
-      directory = directory.replace('//', '/')
+      directory = directory.replace(/\/{2,}/g, '/')
 
       // check option for self signed certs
-      const option = {}
-      if (node.server.insecure) {
-        option.agent = new https.Agent({ rejectUnauthorized: false })
-      }
+      const option = getHttpsOptions(node.server)
       client.getDirectoryContents(directory, option)
         .then(function (contents) {
-          node.send({ 'payload': contents })
+          node.send({ payload: contents })
         }, function (error) {
-          node.error('Nextcloud:WebDAV -> get directory content went wrong.' + JSON.stringify(error), msg)
+          node.error(`Nextcloud:WebDAV -> get directory content went wrong: ${getErrorMessage(error)}`, msg)
         })
     })
   }
@@ -221,8 +271,13 @@ module.exports = function (RED) {
     const node = this
 
     node.on('input', (msg) => {
-      const webDavUri = node.server.address + '/remote.php/webdav/'
-      const client = webdav(webDavUri, node.server.credentials.user, node.server.credentials.pass)
+      const server = getServerConfig(node, msg, 'WebDAV')
+      if (!server) {
+        return
+      }
+
+      const webDavUri = server.address + '/remote.php/webdav/'
+      const client = webdav(webDavUri, server.user, server.pass)
       let filename = ''
       if (msg.filename) {
         filename = '/' + msg.filename
@@ -232,18 +287,15 @@ module.exports = function (RED) {
         node.error('Nextcloud:WebDAV -> no filename specified.', msg)
         return
       }
-      filename = filename.replace('//', '/')
+      filename = filename.replace(/\/{2,}/g, '/')
 
       // check option for self signed certs
-      const option = {}
-      if (node.server.insecure) {
-        option.agent = new https.Agent({ rejectUnauthorized: false })
-      }
+      const option = getHttpsOptions(node.server)
       client.getFileContents(filename, option)
         .then(function (contents) {
-          node.send({ 'payload': contents })
+          node.send({ payload: contents })
         }, function (error) {
-          node.error('Nextcloud:WebDAV -> get file went wrong.' + JSON.stringify(error), msg)
+          node.error(`Nextcloud:WebDAV -> get file went wrong: ${getErrorMessage(error)}`, msg)
         })
     })
   }
@@ -257,13 +309,30 @@ module.exports = function (RED) {
     const node = this
 
     node.on('input', (msg) => {
+      const server = getServerConfig(node, msg, 'WebDAV')
+      if (!server) {
+        return
+      }
+
       // Read upload file
       let filename = node.filename
       if (msg.filename) {
         filename = msg.filename
       }
+      if (!filename) {
+        node.error('Nextcloud:WebDAV -> no local filename specified.', msg)
+        return
+      }
+
       const name = filename.substr((filename.lastIndexOf('/') + 1), filename.length)
-      const file = fs.readFileSync(filename)
+      let file
+      try {
+        file = fs.readFileSync(filename)
+      } catch (err) {
+        node.error(`Nextcloud:WebDAV -> unable to read local file: ${getErrorMessage(err)}`, msg)
+        return
+      }
+
       // Set upload directory
       let directory = '/'
       if (msg.directory) {
@@ -271,23 +340,20 @@ module.exports = function (RED) {
       } else if (node.directory && node.directory.length) {
         directory += node.directory + '/'
       }
-      directory = directory.replace('//', '/')
+      directory = directory.replace(/\/{2,}/g, '/')
 
-      const webDavUri = node.server.address + '/remote.php/webdav/'
-      const client = webdav(webDavUri, node.server.credentials.user, node.server.credentials.pass)
+      const webDavUri = server.address + '/remote.php/webdav/'
+      const client = webdav(webDavUri, server.user, server.pass)
 
       // check option for self signed certs
-      const option = {}
-      if (node.server.insecure) {
-        option.agent = new https.Agent({ rejectUnauthorized: false })
-      }
+      const option = getHttpsOptions(node.server)
 
       client.putFileContents(directory + name, file, { format: 'binary' }, option)
         .then(function (contents) {
           console.log(contents)
-          node.send({ 'payload': JSON.parse(contents) })
-        }, function () {
-          node.error('Nextcloud:WebDAV -> send file went wrong.', msg)
+          node.send({ payload: contents })
+        }, function (err) {
+          node.error(`Nextcloud:WebDAV -> send file went wrong: ${err.message}`, msg)
         })
     })
   }
