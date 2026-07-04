@@ -356,24 +356,34 @@ module.exports = function (RED) {
             return node.error(`Nextcloud:WebDAV -> send file failed. Status: ${status} ${statusText}`, msg)
           }
 
-          let payload = { status: response.status, statusText: response.statusText, size: 0, timeout: 0 }
+          let payload = { status: response.status, statusText: response.statusText }
+          let size = 0
+          let timeout = 0
 
           const text = await response.text()
           if (text) {
             try {
               const parsed = JSON.parse(text)
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                if (Object.prototype.hasOwnProperty.call(parsed, 'size')) {
+                  size = parsed.size
+                }
+                if (Object.prototype.hasOwnProperty.call(parsed, 'timeout')) {
+                  timeout = parsed.timeout
+                }
                 payload = { ...payload, ...parsed }
+                delete payload.size
+                delete payload.timeout
               }
             } catch (e) {
               return node.error(`Nextcloud:WebDAV -> send file response is not valid JSON: ${e.message}`, msg)
             }
           }
 
-          payload.size = Number.isFinite(Number(payload.size)) ? Number(payload.size) : 0
-          payload.timeout = Number.isFinite(Number(payload.timeout)) ? Number(payload.timeout) : 0
+          size = Number.isFinite(Number(size)) ? Number(size) : 0
+          timeout = Number.isFinite(Number(timeout)) ? Number(timeout) : 0
 
-          node.send({ ...msg, payload })
+          node.send({ ...msg, payload, size, timeout })
         }, function (err) {
           node.error(`Nextcloud:WebDAV -> send file went wrong: ${err.message}`, msg)
         })
